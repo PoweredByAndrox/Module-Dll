@@ -1,5 +1,10 @@
 ﻿#include "..\Dll\Dll.h"
 
+// CURRENT VERSION IS DEFINE "SUPPORT_VERSION"
+
+#define CURRENT_VERSION_TEXT "0.0.0"
+#define CURRENT_VERSION 0x00000000L
+
 // Useful links below:
 //https://stackoverflow.com/questions/65802990/convert-stdfunctionvoid-to-void
 //https://stackoverflow.com/questions/10079625/c-run-time-check-failure-0-the-value-of-esp-was-not-properly-saved-across-a
@@ -43,11 +48,10 @@ public:
 	// Args - is what args of nededed function to get from DLL
 	// Return NULL was failed loading DLL or function wasn't found in Library
 	template<class T, class Args = void>
-	std::function<T(Args)> GetFunctionDLL(const std::string &path = "G:\\Test_Dlls\\Debug\\Dll.dll",
-		const std::string& func_name = "test_api");
+	std::function<T(Args)> GetFunctionDLL(const std::string &path, const std::string& func_name);
 
 	// Load Dll And Starts Whole Functions In Dll
-	std::pair<void *, void *> LoadDLL(const std::string &path = "G:\\Test_Dlls\\Debug\\Dll.dll",
+	std::pair<void *, void *> LoadDLL(const std::string &path = "..\\Debug\\Dll.dll",
 		std::pair<void *, void *> Args = { (void *)"test_args_for_init", (void *)"test_args_for_start" });
 
 	// Detach required DLL from array
@@ -56,7 +60,7 @@ public:
 private:
 	std::map<std::string, HINSTANCE> Dlls;
 
-	const std::string InitFuncName = "init_dll", StartFuncName = "start_dll";
+	const std::string InitFuncName = "init_dll", StartFuncName = "start_dll", version = "get_version", support_version = "get_suport_version";
 };
 
 ManagerDLL::ManagerDLL()
@@ -92,10 +96,34 @@ void ManagerDLL::DetachDLL(const std::string &id)
 template<class T, class Args>
 std::function<T(Args)> ManagerDLL::GetFunctionDLL(const std::string &path, const std::string &func_name)
 {
+	if (path.empty())
+	{
+		MessageBoxA(0, "Library Path Is Empty! Aborting", "Error", MB_OK);
+		return nullptr;
+	}
+	else if (func_name.empty())
+	{
+		MessageBoxA(0, "Function Name Is Empty! Aborting", "Error", MB_OK);
+		return nullptr;
+	}
+
+	std::string path_id = path.substr(path.find_last_of('\\') + 1);
+
+	auto Dll = Dlls.find(path_id);
+
 	//typedef T(WINAPI *def_func)(Args);
 	typedef T(WINAPIV *def_func)(Args);
-	HINSTANCE newDll;
-	if (!(newDll = ::LoadLibraryA(path.c_str())))
+	HINSTANCE newDll = nullptr;
+
+	if (Dll != Dlls.end())
+	{
+		newDll = (*Dll).second;
+	}
+	else
+	{
+		newDll = ::LoadLibraryA(path.c_str());
+	}
+	if (!newDll)
 	{
 		MessageBoxA(0, ("Library from '" + path + "' don't load, error text: " + GetLastErrorAsString()).c_str(), "Error", MB_OK);
 	}
@@ -109,7 +137,9 @@ std::function<T(Args)> ManagerDLL::GetFunctionDLL(const std::string &path, const
 		def_func someFunc = (def_func)::GetProcAddress(newDll, func_name.c_str());
 		if (someFunc)
 		{
-			Dlls.insert({ path.substr(path.find_last_of('\\') + 1), newDll });
+			if (Dlls.find(path_id) == Dlls.end())
+				Dlls.insert({ path_id, newDll });
+
 			return std::function<T(Args)>{ *someFunc };
 		}
 		else
@@ -124,31 +154,73 @@ std::function<T(Args)> ManagerDLL::GetFunctionDLL(const std::string &path, const
 std::pair<void *, void *> ManagerDLL::LoadDLL(const std::string &path, std::pair<void *, void *> Args)
 {
 	HINSTANCE newDll;
-	if ((newDll = ::LoadLibraryA(path.c_str())) == 0)
+
+	if (path.empty())
 	{
-		MessageBoxA(0, ("Library from '" + path + "' don't load, error text: " + GetLastErrorAsString()).c_str(), "Error", MB_OK);
+		MessageBoxA(0, "Library Path Is Empty! Aborting", "Error", MB_OK);
+		return { nullptr, nullptr };
+	}
+
+	std::string path_id = path.substr(path.find_last_of('\\') + 1);
+
+	if (!Dlls.empty() && Dlls.find(path_id) != Dlls.end())
+	{
+		MessageBoxA(0, ("Current library '" + version + "' already loaded in system!").c_str(), "Error", MB_OK);
 	}
 	else
 	{
-		/* this is when our function was linked with __stdcall (WINAPI define)
-		*
-		* def_func pfnMyFunction = (def_func)::GetProcAddress(hMyDll, ("_" + func_name + "@4").c_str());
-		*/
-
-		typedef void *(WINAPIV *def_func)(void *);
-		def_func InitFunc = (def_func)::GetProcAddress(newDll, InitFuncName.c_str());
-		def_func StartFunc = (def_func)::GetProcAddress(newDll, StartFuncName.c_str());
-
-		if (InitFunc && StartFunc)
+		if ((newDll = ::LoadLibraryA(path.c_str())) == 0)
 		{
-			Dlls.insert({ path.substr(path.find_last_of('\\') + 1), newDll });
-
-			return { (*InitFunc)(Args.first), (*StartFunc)(Args.second)};
+			MessageBoxA(0, ("Library from '" + path + "' don't load, error text: " + GetLastErrorAsString()).c_str(), "Error", MB_OK);
 		}
 		else
 		{
-			MessageBoxA(0, ("Functions '" + InitFuncName + "' And '" + StartFuncName + "' from '" + path + "' not found, error text: "
-				+ GetLastErrorAsString()).c_str(), "Error", MB_OK);
+			/* this is when our function was linked with __stdcall (WINAPI define)
+			*
+			* def_func pfnMyFunction = (def_func)::GetProcAddress(hMyDll, ("_" + func_name + "@4").c_str());
+			*/
+
+			typedef long(WINAPIV *def_ver_func)();
+			def_ver_func VersionDLL = (def_ver_func)::GetProcAddress(newDll, version.c_str());
+			def_ver_func SupportVersionDLL = (def_ver_func)::GetProcAddress(newDll, support_version.c_str());
+
+			// check if new dll have functions of versions and supported this exe and not below version support
+			if (VersionDLL && SupportVersionDLL)
+			{
+				long SupportVersion = (*SupportVersionDLL)();
+
+				if (CURRENT_VERSION >= SupportVersion)
+				{
+					typedef void *(WINAPIV *def_func)(void *);
+					def_func InitFunc = (def_func)::GetProcAddress(newDll, InitFuncName.c_str());
+					def_func StartFunc = (def_func)::GetProcAddress(newDll, StartFuncName.c_str());
+
+					if (InitFunc && StartFunc)
+					{
+						Dlls.insert({ path_id, newDll });
+
+						MessageBoxA(0, ("Version Of DLL Is: '" + std::to_string((*VersionDLL)()) +
+							"', Supported Version Is: '" + std::to_string(SupportVersion) + "'").c_str(), "INFO", MB_OK);
+
+						return { (*InitFunc)(Args.first), (*StartFunc)(Args.second) };
+					}
+					else
+					{
+						MessageBoxA(0, ("Functions '" + InitFuncName + "' And '" + StartFuncName + "' from '" + path + "' not found, error text: "
+							+ GetLastErrorAsString()).c_str(), "Error", MB_OK);
+					}
+				}
+				else
+				{
+					MessageBoxA(0, ("Fail Checking Verion Dll, This DLL Is Not Supported By This Version Exe!\nThis Version Exe: '" +
+						std::to_string(CURRENT_VERSION) + "', Support Version DLL: '" + std::to_string(SupportVersion) + "'!").c_str(), "Error", MB_OK);
+				}
+			}
+			else
+			{
+				MessageBoxA(0, ("Functions '" + version + "' And '" + support_version + "' from '" + path + "' not found, error text: "
+					+ GetLastErrorAsString()).c_str(), "Error", MB_OK);
+			}
 		}
 	}
 	return { nullptr, nullptr };
@@ -168,12 +240,37 @@ int main()
 		MessageBoxA(0, "LoadDLL StartFunc Return nullptr!", "Unsuccessful!", MB_OK);
 	}
 
-	/*
-		auto Func = M_Dll->GetFunctionDLL<int, const std::string &>();
-		if (Func)
+	double x = 0.0,
+		y = 0.0,
+		result = 0.0;
+	char oper = '+';
+
+	std::cout << "Calculator Console Application" << std::endl << std::endl;
+	std::cout << "Please enter the operation to perform. Format: a+b | a-b | a*b | a/b" << std::endl;
+
+	while (true)
+	{
+		std::cin >> x >> oper >> y;
+		if (oper == '/' && y == 0)
 		{
-			MessageBoxA(0, ("Func Return Value: " + std::to_string(Func(std::string("Test")))).c_str(), "Done!", MB_OK);
+			std::cout << "Division by 0 exception" << std::endl;
+			continue;
 		}
+		else
+		{
+			auto Func = M_Dll->GetFunctionDLL<void *, void *>("..\\Debug\\Dll.dll", "start_dll");
+			if (Func)
+			{
+				MessageBoxA(0, ("Func Return Value: " +
+					std::to_string(*(double *)Func((void *)std::vector<double>{x, (double) oper, y}.data()))).c_str(),
+					"Done!", MB_OK);
+				result = *(double *)Func((void *)std::vector<double>{x, (double)oper, y}.data());
+			}
+		}
+		std::cout << "Result is: " << result << std::endl;
+	}
+
+	/*
 	*/
 	return 0;
 }
